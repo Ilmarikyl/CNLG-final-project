@@ -11,7 +11,7 @@ from markovchain.text import MarkovText, ReplyMode
 
 wv=lwvlib.load("fin-word2vec-lemma.bin", 10000, 500000)
 vowels = ['a','e','i','o','u','y','ä','ö']
-markov = MarkovText.from_file('markov.json')
+markov = MarkovText.from_file('kalevala_and_others_markov.json')
 
 def count_syllables(verse):
     # Count syllables in a verse
@@ -32,12 +32,17 @@ def most_frequent(List):
 def tokenize_and_lemmatize(words):
     # Tokenize and lemmatize input. Returns a list of lemmas.
     tokenizer = RegexpTokenizer(r'\w+')
-    try:
-        lemmas = [uralicApi.analyze(word.lower(), "fin")[0][0].split('+')[0] for word in tokenizer.tokenize(words)]
-    except Exception as e:
-        print("Lemma not found for some of the words. The program will close.")
-        print("Error message: " + e)
+    lemmas = []
+
+    for word in tokenizer.tokenize(words):
+        for i, analysis in enumerate(uralicApi.analyze(word.lower(), "fin")):
+            if analysis[0].split('+', 1)[1] == 'N+Sg+Nom':
+                lemmas.append(analysis[0].split('+')[0])
+
+    if len(lemmas) < 2:
+        print("Both words were not recognized. The program will close.")
         exit()
+
     return lemmas
 
 
@@ -49,40 +54,51 @@ def markov_verse(name):
 
     while True:
         verse_candidate = markov(max_length=4, reply_to=name, reply_mode=ReplyMode.END)
-        meter_result = finmeter.analyze_kalevala(verse_candidate)
-        if meter_result[0]['base_rule']['result'] == True: #and count_syllables(verse_candidate) == 8:
-            markov_sequence = verse_candidate
-            break
+        try:
+            meter_result = finmeter.analyze_kalevala(verse_candidate)
+            if meter_result[0]['base_rule']['result'] == True: #and count_syllables(verse_candidate) == 8:
+                markov_sequence = verse_candidate
+                break
+        except:
+            pass
 
     return markov_sequence
 
 
 def get_pos_template(lemmas):
     # Return the POSses of each input word. E.g. "NN"
+    # Currently only searches for NN.
     pos_template = ""
     for lemma in lemmas:
         candidates = []
         for analysis in uralicApi.analyze(lemma, "fin"):
             pos = analysis[0].split('+')[1]
             # print(analysis)
-            candidates.append(pos)
+            if pos == 'N':
+                candidates.append(pos)
         pos_template += most_frequent(candidates)
 
     return pos_template
+
+def add_two_syllables_in_front(verse):
+    return verse[:2] + random.choice(['k','t','p','s']) + uralicApi.analyze(verse.split(" ")[0], "fin")[0][0].split('+')[0][-1] + " " + verse
 
 
 def fix_syllables(verse):
     # This function should do something when the amount of syllables is not correct. It is not yet implemented.
     if count_syllables(verse) == 5:
         verse = verse.replace(verse.split()[1], verse.split()[1] + "pi", 1)
-        verse = verse[:2] + "k" + uralicApi.analyze(verse.split(" ")[0], "fin")[0][0].split('+')[0][-1] + " " + verse
+        verse = add_two_syllables_in_front(verse)
         if verse.split()[0][-1] not in vowels:
             verse = verse.replace(verse.split()[0][-1], "a", 1)
 
     if count_syllables(verse) == 6:
-        verse = verse[:2] + "k" + uralicApi.analyze(verse.split(" ")[0], "fin")[0][0].split('+')[0][-1] + " " + verse
+        verse = add_two_syllables_in_front(verse)
         if verse.split()[0][-1] not in vowels:
             verse = verse.replace(verse.split()[0][-1], "a", 1)
+
+    if count_syllables(verse) == 7:
+        verse = verse.replace(verse.split()[1], verse.split()[1] + "pi", 1)
     
     return verse
 
@@ -162,7 +178,6 @@ def main():
                 lemma_dict['verb'] = draw[0]
                 verse.append(uralicApi.generate(draw[0]+"+V+Act+Ind+Prs+Sg3", "fin")[0][0])
 
-
         # Tämä ajetaan kun input on käyty läpi (sanat taivutettu ja verbi etsitty)
         verse = " ".join(verse)
         verse = fix_syllables(verse)
@@ -173,6 +188,9 @@ def main():
         if first_verse_analysis[0]['base_rule']['result'] == False:
             print("Errors in first verse: " + first_verse_analysis[0]['base_rule']['message'])
 
+    else:
+        print("Input words were not recognized.")
+        exit()
 
     # Laitoin tästä eteenpäin testiksi vain erilaisia komboja syötteeksi markov-funktiolle. Se sallii nyt myös 10-tavuiset säkeet, 8-tavuisia sillä tuntuu
     # olevan vaikeuksia löytää ja se jää junnaamaan, vaikka se olisikin helppo laittaa kriteeriksi. Markov-malli ei löydä kovin monelle sanalle jatkoa
@@ -184,7 +202,6 @@ def main():
     print(markov_verse(lemma_dict['object']))
     print(markov_verse(random.choice(["miten", "kuinka", "vaikka", "jospa"]) + " " + lemma_dict['subject']))
     
-
 
 if __name__ == '__main__':
     main()
